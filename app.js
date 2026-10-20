@@ -443,6 +443,9 @@ function el(tag, options = {}, children = []) {
   if (options.onSubmit) node.addEventListener("submit", options.onSubmit);
   if (options.onInput) node.addEventListener("input", options.onInput);
   if (options.onError) node.addEventListener("error", options.onError);
+  if (options.href) node.href = options.href;
+  if (options.target) node.target = options.target;
+  if (options.rel) node.rel = options.rel;
 
   for (const child of children) {
     if (child === null || child === undefined) continue;
@@ -738,16 +741,19 @@ function renderSettings() {
   section.append(
     el("div", { className: "panel" }, [
       el("p", {
-        text: "Добавьте свои незавершённые задачи. Приложение случайно выберет одну активную задачу и покажет её на экране «Сегодня».",
+        text: "Добавьте свои незавершенные задачи. Приложение случайно выберет одну и покажет ее на главном экране.",
       }),
       el("ul", {}, [
-        el("li", { text: "Работайте только с текущей задачей." }),
-        el("li", { text: "Выполненные задачи перемещаются в архив." }),
+        el("li", { text: "Работайте только с сегодняшней задачей." }),
+        el("li", { text: "Выполненные задачи отправляются в архив." }),
         el("li", {
-          text: "Незавершённая задача остаётся текущей, пока вы не выполните, не отмените или не удалите её.",
+          text: "Задача остается текущей, пока вы не выполните, не отмените или не удалите ее.",
         }),
         el("li", {
-          text: "Новая задача появляется в следующий активный день — когда вы снова откроете приложение в новый календарный день.",
+          text: "Новая задача появится, когда вы снова откроете приложение в новый календарный день.",
+        }),
+        el("li", {
+          text: "Если очень хочется поменять задачу сегодняшнего дня, перейдите в список задач, нажмите на эту задачу и выберите «Не буду делать». Задача переместится в архив. В архиве нажмите на крестик в чекбоксе − эта задача вернется в общий список, а задача дня поменяется. Но не рекомендуем злоупотреблять этой возможностью − ведь смысл в том, чтобы все-таки сделать все дела.",
         }),
       ]),
       !state.hasCompletedOnboarding
@@ -775,6 +781,20 @@ function renderSettings() {
               },
             }),
           ]),
+    ]),
+  );
+  section.append(
+    el("div", { className: "panel coffee-panel" }, [
+      el("p", {}, [
+        document.createTextNode("Угостить разработчика кофе с печенькой: "),
+        el("a", {
+          className: "coffee-link",
+          text: "поддержать",
+          href: "https://www.tbank-online.com/rm/r_fLvFyzoCyW.yMzeuwLmIt/OcRGd78921",
+          target: "_blank",
+          rel: "noopener noreferrer",
+        }),
+      ]),
     ]),
   );
   return section;
