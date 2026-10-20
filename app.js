@@ -4,6 +4,7 @@ const DEFAULT_STATE = {
   tasks: [],
   currentTaskId: null,
   currentActiveDate: null,
+  successImageDate: null,
   hasCompletedOnboarding: false,
 };
 
@@ -99,6 +100,7 @@ function ensureTodaySelection() {
 
   if (state.currentActiveDate !== today) {
     state.currentActiveDate = today;
+    state.successImageDate = null;
 
     if (!isTaskActive(state.currentTaskId)) {
       const nextTask = pickRandomTask(eligibleActiveTasks());
@@ -117,6 +119,7 @@ function ensureTodaySelection() {
 
 function replaceCurrentTaskNow() {
   if (!state.currentActiveDate) state.currentActiveDate = todayKey();
+  state.successImageDate = null;
   const nextTask = pickRandomTask(eligibleActiveTasks());
   state.currentTaskId = nextTask ? nextTask.id : null;
 }
@@ -153,7 +156,9 @@ function completeTask(id, { showEffect = false } = {}) {
   task.availableAfterActiveDate = null;
 
   if (state.currentTaskId === id) {
+    if (!state.currentActiveDate) state.currentActiveDate = todayKey();
     state.currentTaskId = null;
+    state.successImageDate = state.currentActiveDate;
     if (showEffect) showCelebration();
   }
 
@@ -317,6 +322,8 @@ function el(tag, options = {}, children = []) {
   if (options.id) node.id = options.id;
   if (options.value !== undefined) node.value = options.value;
   if (options.placeholder) node.placeholder = options.placeholder;
+  if (options.src) node.src = options.src;
+  if (options.alt !== undefined) node.alt = options.alt;
   if (options.ariaLabel) node.setAttribute("aria-label", options.ariaLabel);
   if (options.role) node.setAttribute("role", options.role);
   if (options.rows) node.rows = options.rows;
@@ -324,6 +331,7 @@ function el(tag, options = {}, children = []) {
   if (options.onClick) node.addEventListener("click", options.onClick);
   if (options.onSubmit) node.addEventListener("submit", options.onSubmit);
   if (options.onInput) node.addEventListener("input", options.onInput);
+  if (options.onError) node.addEventListener("error", options.onError);
 
   for (const child of children) {
     if (child === null || child === undefined) continue;
@@ -364,7 +372,7 @@ function render() {
 function renderOnboarding() {
   return el("main", { className: "screen without-nav" }, [
     el("section", { className: "hero" }, [
-      el("p", { className: "eyebrow", text: "Одна задача в день" }),
+      el("p", { className: "eyebrow", text: "Одна задача" }),
       el("h1", { text: "Спокойно разберите накопившееся" }),
       el("p", {
         className: "lead",
@@ -425,8 +433,22 @@ function renderToday() {
   }
 
   const hasActive = activeTasks().length > 0;
+  const showSuccessImage = state.successImageDate === state.currentActiveDate;
   section.append(
     el("div", { className: "empty-card" }, [
+      showSuccessImage
+        ? el("img", {
+            className: "success-illustration",
+            src: "cat-success.png",
+            alt: "Довольный котик",
+            onError: (event) => {
+              if (!event.currentTarget.dataset.fallback) {
+                event.currentTarget.dataset.fallback = "true";
+                event.currentTarget.src = "cat-success.svg";
+              }
+            },
+          })
+        : null,
       el("h3", { text: hasActive ? "На сегодня задач нет" : "Активных задач нет" }),
       el("p", {
         className: "muted",
@@ -534,7 +556,7 @@ function renderArchivedTaskRow(task) {
 
 function renderSettings() {
   const section = el("section");
-  section.append(el("p", { className: "eyebrow", text: "Настройки" }));
+  section.append(el("p", { className: "eyebrow", text: "О программе" }));
   section.append(el("h2", { text: "Как это работает" }));
   section.append(
     el("div", { className: "panel" }, [
@@ -577,7 +599,7 @@ function renderNav() {
   const items = [
     ["today", "Сегодня"],
     ["tasks", "Задачи"],
-    ["settings", "Настройки"],
+    ["settings", "О программе"],
   ];
 
   return el(
