@@ -70,6 +70,31 @@ button {
   box-shadow: var(--shadow);
 }
 
+.auth-card {
+  width: min(460px, 100%);
+  margin: 0 auto;
+  padding: 30px;
+  background: rgba(255, 250, 243, 0.82);
+  border: 1px solid rgba(229, 221, 208, 0.8);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+}
+
+.auth-title {
+  margin-bottom: 12px;
+  font-size: clamp(2rem, 7vw, 3rem);
+}
+
+.auth-card .field-label {
+  margin-top: 16px;
+}
+
+.auth-message {
+  margin: 14px 0 0;
+  color: var(--danger);
+  line-height: 1.4;
+}
+
 .eyebrow {
   margin: 0 0 12px;
   color: var(--accent-strong);

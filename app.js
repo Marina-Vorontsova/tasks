@@ -1,4 +1,7 @@
 const STORAGE_KEY = "one-task-a-day:v1";
+const SUPABASE_URL = "https://yzdoerkrpevydhkyyjkc.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_0mbTdKpgLlZ1fxixtGQvqA_6dFf-M_T";
+const supabaseClient = window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const DEFAULT_STATE = {
   tasks: [],
@@ -16,8 +19,96 @@ let pendingDelete = null;
 let pendingDeleteTimer = null;
 let celebration = null;
 let celebrationTimer = null;
+let currentUser = null;
+let authReady = false;
+let authMode = "login";
+let authMessage = "";
+let cloudSyncing = false;
+let cloudSyncPending = false;
 
 const app = document.querySelector("#app");
+
+function cloudSettings() {
+  return {
+    user_id: currentUser.id,
+    current_task_id: state.currentTaskId,
+    current_active_date: state.currentActiveDate,
+    success_image_date: state.successImageDate,
+    has_completed_onboarding: state.hasCompletedOnboarding,
+  };
+}
+
+async function syncCloudState() {
+  if (!supabaseClient || !currentUser) return;
+  if (cloudSyncing) {
+    cloudSyncPending = true;
+    return;
+  }
+  cloudSyncing = true;
+  try {
+    await supabaseClient.from("tasks").upsert(
+      state.tasks.map((task) => ({
+        user_id: currentUser.id,
+        id: task.id,
+        text: task.text,
+        description: task.description || "",
+        status: task.status,
+        created_at: task.createdAt,
+        archived_at: task.archivedAt,
+        available_after_active_date: task.availableAfterActiveDate,
+      })),
+      { onConflict: "id" },
+    );
+    await supabaseClient.from("user_settings").upsert(cloudSettings(), { onConflict: "user_id" });
+  } catch (error) {
+    console.warn("Не удалось синхронизировать данные", error);
+  } finally {
+    cloudSyncing = false;
+    if (cloudSyncPending) {
+      cloudSyncPending = false;
+      syncCloudState();
+    }
+  }
+}
+
+async function loadCloudState() {
+  if (!supabaseClient || !currentUser) return;
+
+  const [{ data: cloudTasks, error: tasksError }, { data: cloudSettingsRow, error: settingsError }] =
+    await Promise.all([
+      supabaseClient.from("tasks").select("*").eq("user_id", currentUser.id).order("created_at", { ascending: true }),
+      supabaseClient.from("user_settings").select("*").eq("user_id", currentUser.id).maybeSingle(),
+    ]);
+
+  if (tasksError || settingsError) {
+    console.warn("Не удалось загрузить данные из Supabase", tasksError || settingsError);
+    return;
+  }
+
+  if ((!cloudTasks || cloudTasks.length === 0) && state.tasks.length > 0) {
+    await syncCloudState();
+    return;
+  }
+
+  state.tasks = (cloudTasks || []).map((task) => normalizeTask({
+    id: task.id,
+    text: task.text,
+    description: task.description,
+    status: task.status,
+    createdAt: task.created_at,
+    archivedAt: task.archived_at,
+    availableAfterActiveDate: task.available_after_active_date,
+  }));
+
+  if (cloudSettingsRow) {
+    state.currentTaskId = cloudSettingsRow.current_task_id;
+    state.currentActiveDate = cloudSettingsRow.current_active_date;
+    state.successImageDate = cloudSettingsRow.success_image_date;
+    state.hasCompletedOnboarding = cloudSettingsRow.has_completed_onboarding;
+  }
+
+  saveLocalState();
+}
 
 function loadState() {
   try {
@@ -44,6 +135,11 @@ function normalizeTask(task) {
 }
 
 function saveState() {
+  saveLocalState();
+  syncCloudState();
+}
+
+function saveLocalState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
@@ -197,7 +293,19 @@ function deleteTask(id) {
   saveState();
   closeModal({ skipRender: true });
   createPendingDelete({ task, index, wasCurrent, previousCurrentTaskId });
+  const cloudDelete = deleteCloudTask(id);
+  pendingDelete.cloudDelete = cloudDelete;
   render();
+}
+
+async function deleteCloudTask(id) {
+  if (!supabaseClient || !currentUser) return;
+  const { error } = await supabaseClient
+    .from("tasks")
+    .delete()
+    .eq("user_id", currentUser.id)
+    .eq("id", id);
+  if (error) console.warn("Не удалось удалить задачу из облака", error);
 }
 
 function createPendingDelete(context) {
@@ -210,10 +318,15 @@ function createPendingDelete(context) {
   }, 3000);
 }
 
-function undoDelete() {
+async function undoDelete() {
   if (!pendingDelete) return;
 
-  const { task, index, wasCurrent, previousCurrentTaskId } = pendingDelete;
+  const { task, index, wasCurrent, previousCurrentTaskId, cloudDelete } = pendingDelete;
+  if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer);
+  pendingDeleteTimer = null;
+  pendingDelete = null;
+
+  await cloudDelete;
   const safeIndex = Math.max(0, Math.min(index, state.tasks.length));
   state.tasks.splice(safeIndex, 0, task);
 
@@ -221,9 +334,6 @@ function undoDelete() {
     state.currentTaskId = previousCurrentTaskId;
   }
 
-  pendingDelete = null;
-  if (pendingDeleteTimer) clearTimeout(pendingDeleteTimer);
-  pendingDeleteTimer = null;
   saveState();
   render();
 }
@@ -324,6 +434,7 @@ function el(tag, options = {}, children = []) {
   if (options.placeholder) node.placeholder = options.placeholder;
   if (options.src) node.src = options.src;
   if (options.alt !== undefined) node.alt = options.alt;
+  if (options.autocomplete) node.setAttribute("autocomplete", options.autocomplete);
   if (options.ariaLabel) node.setAttribute("aria-label", options.ariaLabel);
   if (options.role) node.setAttribute("role", options.role);
   if (options.rows) node.rows = options.rows;
@@ -356,6 +467,11 @@ function squareButton({ label, className = "", text = "", onClick }) {
 function render() {
   app.replaceChildren();
 
+  if (!authReady || !currentUser) {
+    app.append(renderAuthScreen());
+    return;
+  }
+
   if (!state.hasCompletedOnboarding && view === "onboarding") {
     app.append(renderOnboarding());
     if (modal) app.append(renderModal());
@@ -367,6 +483,73 @@ function render() {
   app.append(renderMainScreen());
   if (modal) app.append(renderModal());
   if (pendingDelete) app.append(renderSnackbar());
+}
+
+function renderAuthScreen() {
+  const form = el("form", {
+    className: "auth-card",
+    onSubmit: async (event) => {
+      event.preventDefault();
+      const email = event.currentTarget.querySelector("#auth-email").value.trim();
+      const password = event.currentTarget.querySelector("#auth-password").value;
+      if (!email || !password || !supabaseClient) return;
+
+      authMessage = "Подождите…";
+      render();
+      const result = authMode === "login"
+        ? await supabaseClient.auth.signInWithPassword({ email, password })
+        : await supabaseClient.auth.signUp({ email, password });
+
+      if (result.error) {
+        authMessage = result.error.message;
+        render();
+      } else if (authMode === "signup" && !result.data.session) {
+        authMessage = "Проверьте почту, чтобы подтвердить регистрацию.";
+        render();
+      }
+    },
+  });
+
+  form.append(...[
+    el("p", { className: "eyebrow", text: "Одна задача" }),
+    el("h1", { className: "auth-title", text: authMode === "login" ? "Войти" : "Создать аккаунт" }),
+    el("p", {
+      className: "lead",
+      text: "Ваши задачи будут доступны на всех устройствах.",
+    }),
+    el("label", { className: "field-label", text: "Email" }),
+    el("input", {
+      id: "auth-email",
+      className: "title-field",
+      type: "email",
+      placeholder: "you@example.com",
+      autocomplete: "email",
+    }),
+    el("label", { className: "field-label", text: "Пароль" }),
+    el("input", {
+      id: "auth-password",
+      className: "title-field",
+      type: "password",
+      placeholder: "Минимум 6 символов",
+      autocomplete: authMode === "login" ? "current-password" : "new-password",
+    }),
+    authMessage ? el("p", { className: "auth-message", text: authMessage }) : null,
+    el("div", { className: "modal-actions" }, [
+      el("button", { className: "button primary", type: "submit", text: authMode === "login" ? "Войти" : "Зарегистрироваться" }),
+      el("button", {
+        className: "button ghost",
+        type: "button",
+        text: authMode === "login" ? "Создать аккаунт" : "У меня уже есть аккаунт",
+        onClick: () => {
+          authMode = authMode === "login" ? "signup" : "login";
+          authMessage = "";
+          render();
+        },
+      }),
+    ]),
+  ].filter(Boolean));
+
+  return el("main", { className: "screen without-nav" }, [form]);
 }
 
 function renderOnboarding() {
@@ -583,7 +766,15 @@ function renderSettings() {
               onClick: () => setView("onboarding"),
             }),
           ])
-        : null,
+        : el("div", { className: "actions" }, [
+            el("button", {
+              className: "button ghost",
+              text: "Выйти",
+              onClick: async () => {
+                await supabaseClient?.auth.signOut();
+              },
+            }),
+          ]),
     ]),
   );
   return section;
@@ -732,4 +923,34 @@ function renderSnackbar() {
   ]);
 }
 
-render();
+async function initializeAuth() {
+  if (!supabaseClient) {
+    authReady = true;
+    render();
+    return;
+  }
+
+  const { data } = await supabaseClient.auth.getSession();
+  currentUser = data.session?.user || null;
+
+  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+    currentUser = session?.user || null;
+    authReady = true;
+    if (currentUser) {
+      await loadCloudState();
+      view = state.hasCompletedOnboarding ? "today" : "onboarding";
+    } else {
+      view = "onboarding";
+    }
+    render();
+  });
+
+  authReady = true;
+  if (currentUser) {
+    await loadCloudState();
+    view = state.hasCompletedOnboarding ? "today" : "onboarding";
+  }
+  render();
+}
+
+initializeAuth();
