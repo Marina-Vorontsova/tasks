@@ -441,12 +441,6 @@ function renderToday() {
             className: "success-illustration",
             src: "cat-success.png",
             alt: "Довольный котик",
-            onError: (event) => {
-              if (!event.currentTarget.dataset.fallback) {
-                event.currentTarget.dataset.fallback = "true";
-                event.currentTarget.src = "cat-success.svg";
-              }
-            },
           })
         : null,
       el("h3", { text: hasActive ? "На сегодня задач нет" : "Активных задач нет" }),
